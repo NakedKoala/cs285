@@ -29,8 +29,6 @@ def sample_trajectory(env, policy, max_path_length, render=False, render_mode=('
         obs.append(ob)
         ##TODO: Set a debugger and find out what is going on here.
         ac = policy.get_action(np.array([ob])) # HINT: query the policy's get_action function
-        import pdb 
-        pdb.set_trace()
         ac = ac[0]
         acs.append(ac)
 
@@ -48,6 +46,7 @@ def sample_trajectory(env, policy, max_path_length, render=False, render_mode=('
         terminals.append(rollout_done)
 
         if rollout_done:
+            print(f'steps when done: {steps}')
             break
 
     return Path(obs, image_obs, acs, rewards, next_obs, terminals)
@@ -77,9 +76,7 @@ def sample_n_trajectories(env, policy, ntraj, max_path_length, render=False, ren
         TODO implement this function
         Hint1: use sample_trajectory to get each path (i.e. rollout) that goes into paths
     """
-    paths = []
-
-    TODO
+    paths = [ sample_trajectory(env, policy, max_path_length, render=render) for i in range(ntraj)]
 
     return paths
 

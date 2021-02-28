@@ -1,9 +1,9 @@
 import os
 import time
-
 from cs285.infrastructure.rl_trainer import RL_Trainer
 from cs285.agents.bc_agent import BCAgent
 from cs285.policies.loaded_gaussian_policy import LoadedGaussianPolicy
+import wandb 
 
 class BC_Trainer(object):
 
@@ -98,23 +98,17 @@ def main():
         logdir_prefix = 'q1_'
         assert args.n_iter==1, ('Vanilla behavior cloning collects expert data just once (n_iter=1)')
 
-    ## directory for logging
-    data_path = os.path.join(os.path.dirname(os.path.realpath(__file__)), '../../data')
-    if not (os.path.exists(data_path)):
-        os.makedirs(data_path)
-    logdir = logdir_prefix + args.exp_name + '_' + args.env_name + '_' + time.strftime("%d-%m-%Y_%H-%M-%S")
-    logdir = os.path.join(data_path, logdir)
-    params['logdir'] = logdir
-    if not(os.path.exists(logdir)):
-        os.makedirs(logdir)
+    ##Setup logger 
 
-
+    wandb.init(config=params , project='cs285', group=args.exp_name)
+    params['log_dir'] = wandb.run.dir
     ###################
     ### RUN TRAINING
     ###################
-
     trainer = BC_Trainer(params)
     trainer.run_training_loop()
+
+    wandb.finish()
 
 if __name__ == "__main__":
     main()

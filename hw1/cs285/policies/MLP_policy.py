@@ -75,14 +75,14 @@ class MLPPolicy(BasePolicy, nn.Module, metaclass=abc.ABCMeta):
     ##################################
 
     def get_action(self, obs: np.ndarray) -> np.ndarray:
-        import pdb 
-        pdb.set_trace()
+       
         if len(obs.shape) > 1:
             observation = obs
         else:
             observation = obs[None]
-
-        return self(observation)
+        
+        observation = torch.tensor(observation).float()
+        return self(observation).detach().cpu().numpy()
 
         # # TODO return the action that the policy prescribes
         # raise NotImplementedError
@@ -98,6 +98,9 @@ class MLPPolicy(BasePolicy, nn.Module, metaclass=abc.ABCMeta):
     # return more flexible objects, such as a
     # `torch.distributions.Distribution` object. It's up to you!
     def forward(self, observation: torch.FloatTensor) -> Any:
+        # import pdb 
+        # pdb.set_trace()
+        
         if self.discrete:
             return self.logits_na(observation)
         else:
@@ -118,8 +121,12 @@ class MLPPolicySL(MLPPolicy):
             adv_n=None, acs_labels_na=None, qvals=None
     ):
         # TODO: update the policy and return the loss
-        import pdb 
-        pdb.set_trace()
+
+        self.optimizer.zero_grad()
+        
+        observations = torch.tensor(observations)
+        actions = torch.tensor(actions)
+       
         pred = self(observations)
         loss = self.loss(pred, actions)
         loss.backward()

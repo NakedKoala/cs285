@@ -1,17 +1,21 @@
 from collections import OrderedDict
 import numpy as np
+import pandas as pd
 import time
+
+import seaborn as sns
 
 import gym
 import torch
 
 from cs285.infrastructure import pytorch_util as ptu
-from cs285.infrastructure.logger import Logger
+from cs285.infrastructure.logger import Logger,  wandb_log_paths_as_videos
 from cs285.infrastructure import utils
+import wandb
 
 # how many rollouts to save as videos to tensorboard
-MAX_NVIDEO = 2
-MAX_VIDEO_LEN = 40  # we overwrite this in the code below
+MAX_NVIDEO = 1
+MAX_VIDEO_LEN = 1000  # we overwrite this in the code below
 
 
 class RL_Trainer(object):
@@ -24,8 +28,7 @@ class RL_Trainer(object):
 
         # Get params, create logger, create TF session
         self.params = params
-        self.logger = Logger(self.params['logdir'])
-
+        
         # Set random seeds
         seed = self.params['seed']
         np.random.seed(seed)
@@ -87,6 +90,11 @@ class RL_Trainer(object):
         self.total_envsteps = 0
         self.start_time = time.time()
 
+        learning_curve_dict = {
+            'iter': [],
+            'return': []
+        }
+
         for itr in range(n_iter):
             print("\n\n********** Iteration %i ************"%itr)
 
@@ -128,11 +136,19 @@ class RL_Trainer(object):
                 # perform logging
                 print('\nBeginning logging procedure...')
                 self.perform_logging(
-                    itr, paths, eval_policy, train_video_paths, training_logs)
-
+                    itr, paths, eval_policy, train_video_paths, training_logs, learning_curve_dict)
+                
                 if self.params['save_params']:
                     print('\nSaving agent params')
                     self.agent.save('{}/policy_itr_{}.pt'.format(self.params['logdir'], itr))
+
+    
+        import matplotlib.pyplot as plt
+        learning_curve_df = pd.DataFrame(learning_curve_dict)
+        learning_curve_plot = sns.lineplot(x='iter', y='return', data=learning_curve_df )
+        learning_curve_plot.set_title("Eval Return distribution progression over Iters")
+        wandb.log({"learning_curve":  wandb.Image(learning_curve_plot.get_figure())})
+        wandb.log({"learning_curve_df": wandb.Table(dataframe=learning_curve_df)})
 
     ####################################
     ####################################
@@ -164,9 +180,7 @@ class RL_Trainer(object):
         if itr == 0:
             import pickle
             with open(load_initial_expertdata, 'rb') as f:
-                 loaded_paths = pickle.load(f)
-            import pdb 
-            pdb.set_trace()
+                 loaded_paths = pickle.load(f)          
             return loaded_paths, 0, None 
 
         # TODO collect `batch_size` samples to be used for training
@@ -210,9 +224,7 @@ class RL_Trainer(object):
         # HINT: query the policy (using the get_action function) with paths[i]["observation"]
         # and replace paths[i]["action"] with these expert labels
         for i in range(len(paths)):
-            action = expert_policy.get_action(paths[i]["observation"])
-            import pdb 
-            pdb.set_trace()
+            action = expert_policy.get_action(paths[i]["observation"])          
             paths[i]['action'] = action 
 
         return paths
@@ -220,29 +232,40 @@ class RL_Trainer(object):
     ####################################
     ####################################
 
-    def perform_logging(self, itr, paths, eval_policy, train_video_paths, training_logs):
-
+    def perform_logging(self, itr, paths, eval_policy, train_video_paths, training_logs, learning_curve_dict):
+     
         # collect eval trajectories, for logging
         print("\nCollecting data for eval...")
+       
         eval_paths, eval_envsteps_this_batch = utils.sample_trajectories(self.env, eval_policy, self.params['eval_batch_size'], self.params['ep_len'])
 
         # save eval rollouts as videos in tensorboard event file
-        if self.log_video and train_video_paths != None:
+        if self.log_video:
+            if train_video_paths != None:
+                #save train/eval videos
+                print('\nSaving train rollouts as videos...')
+
+                wandb_log_paths_as_videos(train_video_paths, itr, fps=self.fps, max_videos_to_save=MAX_NVIDEO,
+                                                video_title='train_rollouts')
+        
             print('\nCollecting video rollouts eval')
             eval_video_paths = utils.sample_n_trajectories(self.env, eval_policy, MAX_NVIDEO, MAX_VIDEO_LEN, True)
+            print('\nSaving val rollouts as videos...')
 
-            #save train/eval videos
-            print('\nSaving train rollouts as videos...')
-            self.logger.log_paths_as_videos(train_video_paths, itr, fps=self.fps, max_videos_to_save=MAX_NVIDEO,
-                                            video_title='train_rollouts')
-            self.logger.log_paths_as_videos(eval_video_paths, itr, fps=self.fps,max_videos_to_save=MAX_NVIDEO,
+            wandb_log_paths_as_videos(eval_video_paths, itr, fps=self.fps,max_videos_to_save=MAX_NVIDEO,
                                              video_title='eval_rollouts')
+           
 
         # save eval metrics
         if self.log_metrics:
             # returns, for logging
             train_returns = [path["reward"].sum() for path in paths]
             eval_returns = [eval_path["reward"].sum() for eval_path in eval_paths]
+            
+            # Save eval return to dictionary for plotting
+            learning_curve_dict['iter'] += [itr] * len(eval_returns)
+            learning_curve_dict['return'] += eval_returns
+            
 
             # episode lengths, for logging
             train_ep_lens = [len(path["reward"]) for path in paths]
@@ -264,7 +287,12 @@ class RL_Trainer(object):
 
             logs["Train_EnvstepsSoFar"] = self.total_envsteps
             logs["TimeSinceStart"] = time.time() - self.start_time
+
+            logs['Eval_Return_Scalars'] = eval_returns
+
             last_log = training_logs[-1]  # Only use the last log for now
+
+        
             logs.update(last_log)
 
 
@@ -272,10 +300,14 @@ class RL_Trainer(object):
                 self.initial_return = np.mean(train_returns)
             logs["Initial_DataCollection_AverageReturn"] = self.initial_return
 
-            # perform the logging
+               # perform the logging
             for key, value in logs.items():
                 print('{} : {}'.format(key, value))
-                self.logger.log_scalar(value, key, itr)
+            
+
+            wandb.log(logs)
+
+
             print('Done logging...\n\n')
 
-            self.logger.flush()
+            
